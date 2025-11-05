@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<title>🧊 Kjøleskapsassistent v2.2</title>
+<style>
+body {
+  font-family:sans-serif; max-width:700px; margin:auto; padding:1rem;
+  background:linear-gradient(to bottom,#f8fafc,#e9eff5);
+}
+h2 { margin-top:1.5rem; }
+button,input { padding:0.5rem; margin:0.3rem 0; font-size:1rem; }
+pre { background:#f4f4f4; padding:0.5rem; overflow-x:auto; white-space:pre-wrap; }
+ul { list-style:none; padding:0; }
+li { padding:0.2rem 0; border-bottom:1px solid #ddd; cursor:pointer; }
+input[type="text"] { width:100%; }
+</style>
+</head>
+<body>
+<h1>🧊 Kjøleskapsassistent v2.2</h1>
+
+<label>API-nøkkel:</label>
+<input type="password" id="apiKey" placeholder="sk-..." />
+
+<h2>📸 Analyser kjøleskapsbilder</h2>
+<input type="file" id="fridgeImgs" accept="image/*" multiple>
+<button id="analyzeFridgeBtn">Analyser bilder</button>
+<pre id="fridgeResult"></pre>
+
+<h2>🧾 Les kvittering</h2>
+<input type="file" id="receiptImg" accept="image/*">
+<button id="analyzeReceiptBtn">Analyser kvittering</button>
+<pre id="receiptResult"></pre>
+
+<h2>📋 Din basisliste</h2>
+<ul id="baseList"></ul>
+<input type="text" id="newItem" placeholder="Legg til vare manuelt">
+<button id="addItemBtn">Legg til</button>
+<button id="clearBaseBtn">Tøm base</button>
+
+<h2>🛒 Forslått handleliste</h2>
+<pre id="shoppingList"></pre>
+
+<script>
+const baseKey="kjoleskap_base";
+const baseList=document.getElementById('baseList');
+let base=cleanList(JSON.parse(localStorage.getItem(baseKey)||"[]"));
+
+function cleanList(arr){
+  return [...new Set(arr.map(x=>x.trim().toLowerCase()).filter(x=>x))].sort();
+}
+function renderBase(){
+  baseList.innerHTML="";
+  base.forEach((item,i)=>{
+    const li=document.createElement('li');
+    li.textContent=item;
+    li.onclick=()=>{ if(confirm(`Slette "${item}"?`)){ base.splice(i,1); saveBase(); } };
+    baseList.appendChild(li);
+  });
+}
+function saveBase(){
+  base=cleanList(base);
+  localStorage.setItem(baseKey,JSON.stringify(base));
+  renderBase();
+}
+renderBase();
+
+async function askGPT(files,prompt){
+  const key=document.getElementById('apiKey').value.trim();
+  if(!key) throw new Error("Mangler API-nøkkel");
+  const contents=[{type:"text",text:prompt}];
+  for(const file of files){
+    const base64=await new Promise(r=>{
+      const reader=new FileReader();
+      reader.onload=()=>r(reader.result.split(",")[1]);
+      reader.readAsDataURL(file);
+    });
+    contents.push({type:"image_url",image_url:{url:"data:image/jpeg;base64,"+base64}});
+  }
+
+  const res=await fetch("https://api.openai.com/v1/chat/completions",{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "Authorization":"Bearer "+key
+    },
+    body:JSON.stringify({
+      model:"gpt-4o",
+      messages:[{role:"user",content:contents}]
+    })
+  });
+  const data=await res.json();
+  if(!data.choices) throw new Error(JSON.stringify(data));
+  return data.choices[0].message.content;
+}
+
+// --- kjøleskapsanalyse ---
+document.getElementById('analyzeFridgeBtn').onclick=async()=>{
+  const files=[...document.getElementById('fridgeImgs').files];
+  if(files.length===0) return alert("Velg ett eller flere bilder først");
+  const out=document.getElementById('fridgeResult');
+  out.textContent="Behandler "+files.length+" bilde(r)…";
+  try{
+    const ans=await askGPT(files,"Se på alle bildene og list opp ALLE matvarer du ser totalt i kjøleskapet, som en ren kommaseparert liste uten kommentarer.");
+    out.textContent=ans;
+    const found=cleanList(ans.split(/,|\n/));
+    const missing=base.filter(x=>!found.includes(x));
+    base=cleanList(base.concat(found));
+    saveBase();
+    document.getElementById('shoppingList').textContent=
+      missing.length ? "Du mangler:\n- "+missing.join("\n- ") : "Alt ser ut til å være på plass!";
+  }catch(e){ out.textContent="Feil: "+e; }
+};
+
+// --- kvittering ---
+document.getElementById('analyzeReceiptBtn').onclick=async()=>{
+  const file=document.getElementById('receiptImg').files[0];
+  if(!file) return alert("Velg kvitteringsbilde først");
+  const out=document.getElementById('receiptResult');
+  out.textContent="Behandler…";
+  try{
+    const ans=await askGPT([file],"Les teksten på kvitteringen og list alle matvarer (uten priser) som en kommaseparert liste.");
+    out.textContent=ans;
+    const newItems=cleanList(ans.split(/,|\n/));
+    base=cleanList(base.concat(newItems));
+    saveBase();
+  }catch(e){ out.textContent="Feil: "+e; }
+};
+
+// --- manuell redigering ---
+document.getElementById('addItemBtn').onclick=()=>{
+  const txt=document.getElementById('newItem').value.trim().toLowerCase();
+  if(txt){ base.push(txt); saveBase(); }
+  document.getElementById('newItem').value="";
+};
+document.getElementById('clearBaseBtn').onclick=()=>{
+  if(confirm("Slette hele basen?")){ base=[]; saveBase(); }
+};
+</script>
+</body>
+</html>
+
