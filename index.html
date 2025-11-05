@@ -136,7 +136,25 @@ document.getElementById('addItemBtn').onclick=()=>{
 document.getElementById('clearBaseBtn').onclick=()=>{
   if(confirm("Slette hele basen?")){ base=[]; saveBase(); }
 };
+  // --- husk API-nøkkel lokalt ---
+const keyField = document.getElementById('apiKey');
+const keyStorageKey = "kjoleskap_api_key";
+
+// hent lagret nøkkel (hvis finnes)
+const savedKey = localStorage.getItem(keyStorageKey);
+if (savedKey) keyField.value = savedKey;
+
+// lagre nøkkelen når den endres
+keyField.addEventListener("input", () => {
+  const val = keyField.value.trim();
+  if (val.startsWith("sk-")) {
+    localStorage.setItem(keyStorageKey, val);
+  } else if (!val) {
+    localStorage.removeItem(keyStorageKey);
+  }
+});
 </script>
 </body>
 </html>
+
 
